@@ -487,6 +487,12 @@ def _logo_b64() -> str:
 # ---------------------------------------------------------------------------
 # Snelle haversine (vervangt geopy.geodesic voor interne berekeningen)
 # ---------------------------------------------------------------------------
+def _station_route_km(s: dict, coords: list, cum: list) -> float:
+    """Geeft de cumulatieve km op het dichtstbijzijnde routepunt voor station s."""
+    best_i = min(range(len(coords)), key=lambda i: _hav(s["lat"], s["lon"], coords[i][1], coords[i][0]))
+    return cum[best_i]
+
+
 def _hav(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
     """Haversine afstand in km — ~10× sneller dan geopy.geodesic."""
     R = 6371.0
@@ -599,30 +605,46 @@ def plan_route(start: tuple, end: tuple, intermediate: tuple,
     total_base = cum[-1]
 
     # Corridorstations — OG primair, concurrent als fallback
-    og_stations_corridor  = _corridor_stations(coords, corridor_km, OG_STATIONS)
-    cng_stations_corridor = _corridor_stations(coords, corridor_km, CNG_STATIONS)
+    # Annoteer elk station met zijn positie (km) langs de route
+    og_stations_corridor = [
+        {**s, "route_km": _station_route_km(s, coords, cum)}
+        for s in _corridor_stations(coords, corridor_km, OG_STATIONS)
+    ]
+    cng_stations_corridor = [
+        {**s, "route_km": _station_route_km(s, coords, cum)}
+        for s in _corridor_stations(coords, corridor_km, CNG_STATIONS)
+    ]
 
-    # Selecteer stops op vaste intervallen
+    # Selecteer stops op vaste intervallen — altijd voorwaarts langs de route
     stops: list[dict] = []
     used: set[str] = set()
+    last_km = 0.0  # route_km van de laatste gekozen stop
     trigger = interval_km
     while trigger < total_base - 10:
         idx = min(range(len(cum)), key=lambda i: abs(cum[i] - trigger))
         pt = coords[idx]
 
-        # Probeer eerst een OG-station
-        og_available = [s for s in og_stations_corridor if s["name"] not in used]
+        # Alleen stations die VOORUIT liggen ten opzichte van de vorige stop
+        og_available = [
+            s for s in og_stations_corridor
+            if s["name"] not in used and s["route_km"] > last_km
+        ]
         if og_available:
             best = min(og_available, key=lambda s: _hav(pt[1], pt[0], s["lat"], s["lon"]))
             stops.append({**best, "source": "og"})
             used.add(best["name"])
+            last_km = best["route_km"]
         else:
-            # Val terug op concurrent CNG-station
-            cng_available = [s for s in cng_stations_corridor if s["name"] not in used]
+            # Val terug op concurrent CNG-station (ook voorwaarts)
+            cng_available = [
+                s for s in cng_stations_corridor
+                if s["name"] not in used and s["route_km"] > last_km
+            ]
             if cng_available:
                 best = min(cng_available, key=lambda s: _hav(pt[1], pt[0], s["lat"], s["lon"]))
                 stops.append({**best, "source": "cng_concurrent"})
                 used.add(best["name"])
+                last_km = best["route_km"]
             else:
                 stops.append({"name": "Geen CNG-station beschikbaar", "lat": pt[1], "lon": pt[0], "source": "missing"})
         trigger += interval_km
