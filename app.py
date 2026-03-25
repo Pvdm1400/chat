@@ -1013,14 +1013,14 @@ st.markdown(f"""
 
 # ── CO₂ & Kostenvergelijking (per land) ──────────────────────────────────────
 # Bouw fueling-events: start + elke tankstop dekt het volgende segment
-fueling_locs = [{"label": "Vertrek", "lat": start_coord[0], "lon": start_coord[1]}]
+fueling_locs = [{"label": "Vertrek", "lat": start_coord[0], "lon": start_coord[1], "route_km": 0.0}]
 for i, s in enumerate(stops, 1):
-    fueling_locs.append({"label": f"Stop {i} — {s['name']}", "lat": s["lat"], "lon": s["lon"]})
+    fueling_locs.append({"label": f"Stop {i} — {s['name']}", "lat": s["lat"], "lon": s["lon"], "route_km": s.get("route_km", i * interval_km)})
 
 n_events = len(fueling_locs)
-# Elk event dekt interval_km, het laatste event dekt de rest
-segment_kms = [float(interval_km)] * n_events
-segment_kms[-1] = max(total_km - (n_events - 1) * interval_km, total_km / max(n_events, 1))
+# Segmentafstand = km van dit punt tot het volgende tankpunt (of einde route)
+route_km_points = [loc["route_km"] for loc in fueling_locs] + [total_km]
+segment_kms = [round(route_km_points[i + 1] - route_km_points[i], 1) for i in range(n_events)]
 
 with st.spinner("Landen opzoeken voor brandstofprijzen..."):
     tankevents = []
